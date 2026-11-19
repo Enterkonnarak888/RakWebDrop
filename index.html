@@ -42,11 +42,16 @@
     const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
     }[char]));
+    const eventTimestamp = record => record?.payload?.timestamp || record?.receivedAt || "";
+    const eventTime = record => {
+      const time = new Date(eventTimestamp(record)).getTime();
+      return Number.isFinite(time) ? time : 0;
+    };
     const dateParts = value => {
       const date = new Date(value);
       return {
         date: date.toLocaleDateString("th-TH", { day: "numeric", month: "short" }),
-        time: date.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })
+        time: date.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
       };
     };
     const emojiNames = {
@@ -298,7 +303,7 @@
           if (seen.has(id)) return false;
           seen.add(id);
           return true;
-        });
+        }).sort((a, b) => eventTime(b) - eventTime(a));
         config = settings;
         render();
       } catch (error) {
@@ -320,13 +325,13 @@
         const text = [item.source, item.sender, item.channel, item.summary, JSON.stringify(item.payload)].join(" ").toLowerCase();
         const categories = categoriesOf(item.payload);
         return (!query || text.includes(query)) &&
-          (filter !== "today" || new Date(item.receivedAt).toDateString() === now.toDateString()) &&
+          (filter !== "today" || new Date(eventTimestamp(item)).toDateString() === now.toDateString()) &&
           (mode === "all" || categories[0] === mode) &&
           (result === "all" || categories.includes(result));
       });
       $("#totalStat").textContent = records.length;
-      $("#todayStat").textContent = records.filter(item => new Date(item.receivedAt).toDateString() === now.toDateString()).length;
-      $("#lastStat").textContent = records[0] ? "ล่าสุด " + dateParts(records[0].receivedAt).time + " น." : "ยังไม่มีรายการใหม่";
+      $("#todayStat").textContent = records.filter(item => new Date(eventTimestamp(item)).toDateString() === now.toDateString()).length;
+      $("#lastStat").textContent = records[0] ? "ล่าสุด " + dateParts(eventTimestamp(records[0])).time + " น." : "ยังไม่มีรายการใหม่";
       $("#countText").textContent = "แสดง " + visible.length + " จาก " + records.length + " รายการ";
       if (!visible.length) {
         const filtered = Boolean(query) || mode !== "all" || result !== "all" || filter === "today";
@@ -339,7 +344,7 @@
         return;
       }
       $("#feed").innerHTML = visible.map(item => {
-        const date = dateParts(item.receivedAt);
+        const date = dateParts(eventTimestamp(item));
         const channel = typeof item.channel === "string" ? item.channel : item.channel?.name || "";
         const categoryBadges = categoriesOf(item.payload).map(name => {
           const categoryClass = name === "Challenge" ? "challenge" :
@@ -418,12 +423,16 @@
       return { label, amount: Number(match[1].replace(/,/g, "")) };
     }
 
-    function calculateDungeonRunRewardSnapshots() {
-      const orderedRecords = records.map((record, index) => ({
+    function chronologicalRecords() {
+      return records.map((record, index) => ({
         record,
         index,
-        time: new Date(record.payload?.timestamp || record.receivedAt || 0).getTime()
+        time: eventTime(record)
       })).sort((a, b) => a.time - b.time || b.index - a.index);
+    }
+
+    function calculateDungeonRunRewardSnapshots() {
+      const orderedRecords = chronologicalRecords();
       const totals = new Map();
       const snapshots = new Map();
       let active = false;
@@ -463,11 +472,7 @@
     }
 
     function calculateDungeonRoomLivesSnapshots() {
-      const orderedRecords = records.map((record, index) => ({
-        record,
-        index,
-        time: new Date(record.payload?.timestamp || record.receivedAt || 0).getTime()
-      })).sort((a, b) => a.time - b.time || b.index - a.index);
+      const orderedRecords = chronologicalRecords();
       const snapshots = new Map();
       let previousRoom = null;
       let previousWasDefeat = false;
@@ -513,11 +518,11 @@
       for (const record of records) {
         const currentOrder = recordOrder++;
         const current = {};
-        const eventTime = new Date(record.payload?.timestamp || record.receivedAt).getTime();
+        const recordEventTime = eventTime(record);
         const matchField = (record.payload?.embeds || []).flatMap(embed => embed.fields || []).find(field => /^match\s*result$/i.test((field.name || "").trim()));
         const sourceDetail = String(matchField?.value || "").split(/\r?\n/).map(value => value.trim()).filter(Boolean)[1] || "";
         const sourceMode = categoriesOf(record.payload)[0] || "ไม่ทราบโหมด";
-        const timestamp = record.payload?.timestamp || record.receivedAt;
+        const timestamp = eventTimestamp(record);
         const messageLink = record.payload?.guild_id && record.payload?.channel && record.payload?.message_id
           ? `https://discord.com/channels/${record.payload.guild_id}/${record.payload.channel}/${record.payload.message_id}` : "";
         for (const embed of record.payload?.embeds || []) {
@@ -550,7 +555,7 @@
                   const quantity = Number(portalMatch[1].replace(/,/g, ""));
                   portalHistory.push({ eventId: record.id, name: portalName, tier, quantity, sourceMode, sourceDetail, timestamp, messageLink, sender: record.sender });
 
-                  if (Number.isFinite(eventTime) && eventTime >= portalBaselineTime) {
+                  if (recordEventTime >= portalBaselineTime) {
                     const key = portalName + "::T" + tier;
                     const inventory = portalCounts.get(key) || { name: portalName, tier, count: 0 };
                     inventory.count += quantity;
