@@ -139,15 +139,19 @@
     function renderEmbed(embed, mode, dungeonRewardEntries, dungeonRoomLivesSnapshot) {
       const allText = [embed.title, embed.description, ...(embed.fields || []).flatMap(field => [field.name, field.value])].join(" ");
       const isDefeat = /\b(defeat|defeated|loss)\b/i.test(allText);
+      const sourceFields = embed.fields || [];
       const isDepth20 = (embed.fields || []).some(field =>
         /\bdungeon\s+run\b/i.test(field.name || "") &&
         [...(field.value || "").matchAll(/\bdepth\s*(\d+)\b/gi)].some(match => Number(match[1]) >= 20)
       );
       const hasPlayerStats = (embed.fields || []).some(field => /^player\s+stats$/i.test((field.name || "").trim()));
-      const sourceFields = embed.fields || [];
-      const isDungeonRun = !isDepth20 && (dungeonDepthFromFields(sourceFields) !== null ||
+      const hasChestsOpened = sourceFields.some(field => /^chests\s+opened$/i.test((field.name || "").trim()));
+      const isGoldCard = isDepth20 || (hasChestsOpened && !isDefeat);
+      const isDungeonRun = !isGoldCard && (dungeonDepthFromFields(sourceFields) !== null ||
         sourceFields.some(field => /^(dungeon\s+run|chests\s+opened)$/i.test((field.name || "").trim())));
-      let visibleFields = sourceFields;
+      let visibleFields = isGoldCard
+        ? sourceFields.filter(field => !/^(total\s+rewards|room)$/i.test((field.name || "").trim()))
+        : sourceFields;
       if (isDungeonRun) {
         const portalIndex = sourceFields.findIndex(field => /^portals$/i.test((field.name || "").trim()));
         const rewardsText = dungeonRewardEntries?.length
@@ -166,7 +170,7 @@
       } else if (mode !== "Summer Hunt") {
         visibleFields = sourceFields.filter(field => !/^portals$/i.test((field.name || "").trim()));
       }
-      const roomSummary = mode === "Dungeon Room" ? dungeonRoomSummaryFromFields(sourceFields) : "";
+      const roomSummary = mode === "Dungeon Room" && !isGoldCard ? dungeonRoomSummaryFromFields(sourceFields) : "";
       const livesSummary = mode === "Dungeon Room" && isDefeat && dungeonRoomLivesSnapshot
         ? Math.max(0, Number(dungeonRoomLivesSnapshot.lives) || 0) + "/5" : "";
       if (roomSummary && !visibleFields.some(field => /^room$/i.test((field.name || "").trim()))) {
@@ -238,7 +242,7 @@
       }
       const footerText = embed.footer?.text || "";
       const timestamp = embed.timestamp ? new Date(embed.timestamp).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "";
-      return '<div class="discord-embed ' + (isDefeat ? "defeat" : "") + " " + (isDepth20 ? "depth-gold" : "") + '">' +
+      return '<div class="discord-embed ' + (isDefeat ? "defeat" : "") + " " + (isGoldCard ? "depth-gold" : "") + '">' +
         (embed.author?.name ? '<div class="embed-author">' + formatText(embed.author.name) + "</div>" : "") +
         (embed.title ? '<div class="embed-title discord-markdown">' + formatText(embed.title) + "</div>" : "") +
         (embed.description ? '<div class="embed-desc discord-markdown">' + formatText(embed.description) + "</div>" : "") +
