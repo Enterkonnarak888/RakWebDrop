@@ -11,6 +11,7 @@ if (fs.existsSync(envFile)) {
 }
 
 const token = process.env.DISCORD_BOT_TOKEN;
+const notificationUserId = process.env.DISCORD_NOTIFY_USER_ID || '';
 const port = Number(process.env.PORT || 4173);
 const configPath = path.join(process.env.DATA_DIR || path.join(__dirname, 'data'), 'config.json');
 if (!token) {
@@ -76,6 +77,28 @@ async function forwardMessage(message, eventType) {
   if (eventType === 'MESSAGE_UPDATE' && response.status === 404) response = await sendPayload('POST');
   if (!response.ok) throw new Error(`RakWebDrop receiver returned HTTP ${response.status}`);
   log(`forwarded ${eventType} from channel ${message.channel_id}${message.content ? ` (${message.content.length} text characters)` : ' (embed/attachment or empty text)'}`);
+}
+async function notifyDungeonDefeat(message) {
+  if (!/^\d{17,20}$/.test(notificationUserId) || !message.channel_id) return;
+  const embeds = Array.isArray(message.embeds) ? message.embeds : [];
+  const isAnimeAdventures = embeds.some(embed => String(embed.title || '').trim().toLowerCase() === 'anime adventures');
+  if (!isAnimeAdventures) return;
+  const resultField = embeds.flatMap(embed => embed.fields || []).find(field => /^match\s*result$/i.test(String(field.name || '').trim()));
+  const result = String(resultField?.value || '');
+  if (!/\bdungeon\s+room\b/i.test(result) || /\binfinite\s+mode\b/i.test(result) || !/\b(defeat|defeated|loss|lost)\b/i.test(result)) return;
+
+  const depth = result.match(/\bDepth\s*[:#-]?\s*(\d+)\b/i)?.[1];
+  const detail = depth ? ` (Depth ${depth})` : '';
+  const response = await fetch(`https://discord.com/api/v10/channels/${message.channel_id}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      content: `<@${notificationUserId}> แพ้ Dungeon Room${detail}`,
+      allowed_mentions: { parse: [], users: [notificationUserId] },
+    }),
+  });
+  if (!response.ok) throw new Error(`Discord returned HTTP ${response.status}; check the bot's Send Messages permission`);
+  log(`sent Dungeon Room defeat notification in channel ${message.channel_id}`);
 }
 async function backfillRecentMessages() {
   const secret = JSON.parse(fs.readFileSync(configPath, 'utf8')).secret;
@@ -167,6 +190,10 @@ async function handleDispatch(packet) {
       if (packet.t === 'MESSAGE_CREATE' && messageId && knownMessageIds.has(messageId)) return;
       await forwardMessage(packet.d, packet.t);
       if (messageId) knownMessageIds.add(messageId);
+      if (packet.t === 'MESSAGE_CREATE') {
+        try { await notifyDungeonDefeat(packet.d); }
+        catch (error) { log(`could not send Dungeon Room notification: ${error.message}`); }
+      }
     }
     catch (error) { log(`could not forward message: ${error.message}`); }
   }
