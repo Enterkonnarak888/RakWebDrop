@@ -7,6 +7,7 @@ const ROOT = __dirname;
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const AGGREGATE_BALANCES_FILE = path.join(DATA_DIR, 'aggregate-balances.json');
 const PORT = Number(process.env.PORT || 4173);
 // Bind to the local network so trusted devices (such as the user's phone) can connect.
 const HOST = process.env.HOST || '0.0.0.0';
@@ -20,6 +21,7 @@ function saveJson(file, value) { fs.writeFileSync(file, JSON.stringify(value, nu
 function makeSecret() { return crypto.randomBytes(24).toString('hex'); }
 let config = readJson(CONFIG_FILE, { secret: makeSecret(), createdAt: new Date().toISOString() });
 let events = readJson(EVENTS_FILE, []);
+let aggregateBalances = readJson(AGGREGATE_BALANCES_FILE, { values: {}, portalOffsets: {} });
 saveJson(CONFIG_FILE, config);
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || config.secret;
@@ -140,6 +142,32 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && url.pathname === '/api/config') {
     return send(res, 200, { endpoint: `http://${req.headers.host || `localhost:${PORT}`}/webhook/${config.secret}`, enabled: true });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/aggregate-balances') {
+    return send(res, 200, aggregateBalances);
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/aggregate-balances') {
+    try {
+      const body = await requestBody(req);
+      const allowedKeys = new Set(['gem', 'gold', 'summer', 'trait', 'cursed', 'star', 'cube']);
+      const values = body.clear ? {} : { ...(aggregateBalances.values || {}) };
+      for (const [key, rawValue] of Object.entries(body.values || {})) {
+        const value = Number(rawValue);
+        if (allowedKeys.has(key) && Number.isSafeInteger(value) && value >= 0) {
+          values[key] = { value, updatedAt: new Date().toISOString() };
+        }
+      }
+      const portalOffsets = body.clear ? {} : { ...(aggregateBalances.portalOffsets || {}) };
+      for (const [key, rawOffset] of Object.entries(body.portalOffsets || {})) {
+        const offset = Number(rawOffset);
+        if (/^.{1,100}::T\d{1,2}$/u.test(key) && Number.isSafeInteger(offset)) portalOffsets[key] = offset;
+      }
+      aggregateBalances = { values, portalOffsets, updatedAt: new Date().toISOString() };
+      saveJson(AGGREGATE_BALANCES_FILE, aggregateBalances);
+      return send(res, 200, aggregateBalances);
+    } catch (error) {
+      return send(res, error.status || 400, { error: error.status === 413 ? 'ข้อมูลมีขนาดใหญ่เกินไป' : 'บันทึกยอดรวมไม่สำเร็จ' });
+    }
   }
   if (req.method === 'GET' && url.pathname === '/api/events') return send(res, 200, events);
   if (req.method === 'POST' && url.pathname === '/api/import') {
