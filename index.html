@@ -61,7 +61,8 @@
       "<:GemAA:1563613761544392794>": "Gem",
       "<:GoldAA:1566642394412220508>": "Gold",
       "<:SummerAA:1566642524636840128>": "Summer",
-      "<:TraitAA:1566642609479360642>": "Trait"
+      "<:TraitAA:1566642609479360642>": "Trait",
+      "<:DawnCoin_128:1574299371250384916>": "Dawn Coin"
     };
 
     function formatText(value) {
@@ -101,12 +102,12 @@
     }
 
     function renderPlayerStats(value) {
-      const icons = { gem: "💎", gold: "🪙", summer: "🏖️", trait: "🌠" };
+      const icons = { gem: "💎", gold: "🪙", summer: "🏖️", trait: "🌠", dawncoin: "💰" };
       return String(value ?? "").split(/\r?\n/).filter(line => line.trim()).map(line => {
         const decoded = line.replace(/<a?:[A-Za-z0-9_]+:\d+>/g, tag => emojiNames[tag] || tag);
-        const match = decoded.match(/^\s*(Gem|Gold|Summer(?:\s+Pearls)?|Trait)\s+(.+?)\s*$/i);
+        const match = decoded.match(/^\s*(Gem|Gold|Summer(?:\s+Pearls)?|Trait|Dawn\s+Coin)\s+(.+?)\s*$/i);
         if (!match) return '<div class="player-stat-row player-stat-raw">' + formatQuantityText(decoded) + "</div>";
-        const key = match[1].toLowerCase().startsWith("summer") ? "summer" : match[1].toLowerCase();
+        const key = match[1].toLowerCase().startsWith("summer") ? "summer" : match[1].toLowerCase().replace(/\s+/g, "");
         const label = key === "summer" ? "Summer Pearls" : match[1];
         return '<div class="player-stat-row"><span class="player-stat-name">' + icons[key] + " " + esc(label) +
           '</span><span class="player-stat-value">' + formatQuantityText(match[2]) + "</span></div>";
